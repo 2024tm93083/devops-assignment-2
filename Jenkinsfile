@@ -36,18 +36,23 @@ stages {
     agent {
       docker {
         image 'python:3.11-slim'
-        args '-u root:root'  // run as root to install pip deps if needed
+        args '-u root:root'
       }
     }
     steps {
       sh '''
+        echo "Running tests from $(pwd) (workspace root)"
         python --version
+        # create venv and install deps
         python -m venv .venv
         . .venv/bin/activate
         pip install --upgrade pip
         pip install -r src/requirements.txt
         pip install pytest
-        pytest -q
+
+        # Make sure the repo root is on PYTHONPATH and run tests as a module
+        export PYTHONPATH="$(pwd)"
+        python -m pytest -q
       '''
     }
   }
