@@ -58,19 +58,29 @@ stages {
   }
 
   stage('SonarQube Analysis') {
-    agent { label 'master' }  // run on Jenkins host (requires sonar-scanner installed or plugin)
+    agent {
+      docker {
+        image 'sonarsource/sonar-scanner-cli:latest'
+        args '-u root:root'   // run as root inside container so scanner can write cache
+      }
+    }
     steps {
-      withCredentials([string(credentialsId: "${SONAR_TOKEN_ID}", variable: 'SONAR_TOKEN')]) {
-        withSonarQubeEnv("${SONAR_SERVER_NAME}") {
-          sh '''
-            sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN} || true
-          '''
-        }
+      withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+        // Use host.docker.internal so the scanner (inside a container) can reach Sonar on your Windows host
+        sh '''
+          echo "Running sonar-scanner..."
+          sonar-scanner \
+            -Dsonar.host.url=http://host.docker.internal:9000 \
+            -Dsonar.login=${SONAR_TOKEN} \
+            -Dsonar.projectKey=ACEest-Fitness \
+            -Dsonar.sources=src
+        '''
       }
     }
   }
 
   stage('Wait for Quality Gate') {
+    // waitForQualityGate requires the Sonar plugin; keep it on any node
     steps {
       timeout(time: 3, unit: 'MINUTES') {
         waitForQualityGate abortPipeline: true
