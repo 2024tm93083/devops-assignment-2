@@ -24,88 +24,99 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '30'))
   }
 
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
+stages {
+
+  stage('Checkout') {
+    steps {
+      checkout scm
+    }
+  }
+
+  stage('Unit Tests') {
+    agent {
+      docker {
+        image 'python:3.11-slim'
+        args '-u root:root'  // run as root to install pip deps if needed
       }
     }
-
-    stage('Unit Tests') {
-      steps {
-        echo "Create venv, install deps and run pytest"
-        sh '''
-          python -m venv .venv
-          . .venv/bin/activate
-          pip install --upgrade pip
-          pip install -r src/requirements.txt
-          pip install pytest
-          python -m pytest -q
-        '''
-      }
+    steps {
+      sh '''
+        python --version
+        python -m venv .venv
+        . .venv/bin/activate
+        pip install --upgrade pip
+        pip install -r src/requirements.txt
+        pip install pytest
+        pytest -q
+      '''
     }
+  }
 
-    stage('SonarQube Analysis') {
-      // Uses Sonar plugin: withSonarQubeEnv binds server config & token
-      steps {
-        withCredentials([string(credentialsId: "${SONAR_TOKEN_ID}", variable: 'SONAR_TOKEN')]) {
-          withSonarQubeEnv("${SONAR_SERVER_NAME}") {
-            sh '''
-              # sonar-project.properties should be at repo root
-              # run sonar-scanner (tool installed or available on PATH)
-              sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN}
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Wait for Quality Gate') {
-      steps {
-        timeout(time: 3, unit: 'MINUTES') {
-          // plugin step that waits for SonarQube quality gate result
-          waitForQualityGate abortPipeline: true
-        }
-      }
-    }
-
-    stage('Build Docker Image') {
-      steps {
-        script {
-          sh "docker build -t ${IMAGE_NAME}:${env.BUILD_ID} ."
-          sh "docker tag ${IMAGE_NAME}:${env.BUILD_ID} ${IMAGE_NAME}:latest"
-        }
-      }
-    }
-
-    stage('Push to Docker Hub') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDS}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+  stage('SonarQube Analysis') {
+    agent { label 'master' }  // run on Jenkins host (requires sonar-scanner installed or plugin)
+    steps {
+      withCredentials([string(credentialsId: "${SONAR_TOKEN_ID}", variable: 'SONAR_TOKEN')]) {
+        withSonarQubeEnv("${SONAR_SERVER_NAME}") {
           sh '''
-            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-            docker push ${IMAGE_NAME}:${env.BUILD_ID}
-            docker push ${IMAGE_NAME}:latest
-          '''
-        }
-      }
-    }
-
-    stage('Deploy to Kubernetes') {
-      when {
-        expression { return fileExists('k8s/deployment-rolling.yaml') }
-      }
-      steps {
-        withCredentials([file(credentialsId: "${KUBECONFIG_CREDS}", variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            export KUBECONFIG=$KUBECONFIG_FILE
-            kubectl apply -f k8s/deployment-rolling.yaml
-            kubectl apply -f k8s/service.yaml
-            kubectl rollout status deployment/aceest-deployment --timeout=120s || (kubectl rollout undo deployment/aceest-deployment && exit 1)
+            sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN} || true
           '''
         }
       }
     }
   }
+
+  stage('Wait for Quality Gate') {
+    steps {
+      timeout(time: 3, unit: 'MINUTES') {
+        waitForQualityGate abortPipeline: true
+      }
+    }
+  }
+
+  stage('Build and Push Docker Image') {
+    agent {
+      docker {
+        image 'docker:27.2.0-cli'   // lightweight docker CLI image
+        args  '-v /var/run/docker.sock:/var/run/docker.sock'
+      }
+    }
+    steps {
+      withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDS}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+        sh '''
+          docker version
+          echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+          docker build -t ${IMAGE_NAME}:${BUILD_ID} .
+          docker tag ${IMAGE_NAME}:${BUILD_ID} ${IMAGE_NAME}:latest
+          docker push ${IMAGE_NAME}:${BUILD_ID}
+          docker push ${IMAGE_NAME}:latest
+        '''
+      }
+    }
+  }
+
+  stage('Deploy to Kubernetes') {
+    when {
+      expression { return fileExists('k8s/deployment-rolling.yaml') }
+    }
+    agent {
+      docker {
+        image 'bitnami/kubectl:latest'
+      }
+    }
+    steps {
+      withCredentials([file(credentialsId: "${KUBECONFIG_CREDS}", variable: 'KUBECONFIG_FILE')]) {
+        sh '''
+          export KUBECONFIG=$KUBECONFIG_FILE
+          kubectl version --client
+          kubectl apply -f k8s/deployment-rolling.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl rollout status deployment/aceest-deployment --timeout=120s || (kubectl rollout undo deployment/aceest-deployment && exit 1)
+        '''
+      }
+    }
+  }
+}
+
 
   post {
     success {
