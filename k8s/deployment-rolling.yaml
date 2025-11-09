@@ -19,9 +19,10 @@ spec:
       labels:
         app: aceest
     spec:
+      automountServiceAccountToken: false
       containers:
       - name: aceest
-        image: 2024tm93083/aceest-fitness:latest
+        image: 2024tm93083/aceest-fitness:v1.0.0
         imagePullPolicy: Always
         ports:
         - containerPort: 5000
@@ -37,3 +38,12 @@ spec:
             port: 5000
           initialDelaySeconds: 10
           periodSeconds: 10
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+            ephemeral-storage: "1Gi"
+          limits:
+            cpu: "250m"
+            memory: "256Mi"
+            ephemeral-storage: "1Gi"
