@@ -36,7 +36,7 @@ stages {
     agent {
       docker {
         image 'python:3.11-slim'
-        args '-u root:root'
+        args '-u root:root --entrypoint=""'
       }
     }
     steps {
@@ -61,7 +61,7 @@ stages {
     agent {
       docker {
         image 'sonarsource/sonar-scanner-cli:latest'
-        args '-u root:root'
+        args '-u root:root --entrypoint=""'
       }
     }
     steps {
@@ -90,7 +90,7 @@ stages {
     agent {
       docker {
         image 'docker:27.2.0-cli'   // lightweight docker CLI image
-        args  '-v /var/run/docker.sock:/var/run/docker.sock'
+        args '-v /var/run/docker.sock:/var/run/docker.sock --entrypoint=""'
       }
     }
     steps {
@@ -114,6 +114,7 @@ stages {
     agent {
       docker {
         image 'bitnami/kubectl:latest'
+        args '--entrypoint=""'
       }
     }
     steps {
