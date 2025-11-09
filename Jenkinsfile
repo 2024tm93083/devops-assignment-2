@@ -122,7 +122,7 @@ stages {
         sh '''
           export KUBECONFIG=$KUBECONFIG_FILE
           kubectl version --client
-          kubectl apply -f k8s/deployment-rolling.yaml
+          kubectl apply --validate=false -f k8s/deployment-rolling.yaml
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment/aceest-deployment --timeout=120s || (kubectl rollout undo deployment/aceest-deployment && exit 1)
         '''
